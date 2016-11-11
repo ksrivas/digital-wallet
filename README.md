@@ -279,8 +279,8 @@ We receive hundreds of submissions and try to evaluate them all in a timely mann
 
 #Solution
 
-## Implementation language: Python
-## File name: `"CheckFraud.py"`
+### Implementation language: Python
+### File name: `"CheckFraud.py"`
 
 The `"run.sh"` script has been appropriately adjusted to call the `"CheckFraud.py"` file.It is a python script which takes exactly 6 parameters
 as the description in the calling script. There are no additional files required. Only one extra check is done for the case where the number of arguments are incorrect. 
