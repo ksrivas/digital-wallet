@@ -1,0 +1,245 @@
+#!/usr/bin/python
+
+
+'''                                                                                                                                                                                  
+The required transaction or fraud checking is done dynamically as follows:
+The following Steps are performed to verify if the transactions are valid:
+
+1.) Read the input file : batch_payment.csv 
+2.) Make a pandas dataframe encompassing both buyers and sellers to create a list of transactions
+3.) Make a dictionary of transactions 
+4.) Once the dictionary is ready, read line by line the stream_payment.csv  
+5.) For each buyerid, check the sellerid if there has been a transaction that has been done between both. 
+6.) This is done as indicated in the following example:                                                                                                                              
+If A, B, C,D , E and F have a transaction, then given the information
+A-B , B-C  , B-D, C-A, C-E, E-G, E-A. G-F                                                                                                                                            
+1.) A-B is trivial
+
+2.) We are interested in seeing  A-G if there is a path then we do the following:
+We first start with A and make a list of A with all others: A:[B,C,E]: Level 1: [B,C,E]                                                                                             
+Level 2:  B:[C,D,E] C:[B,A,E], E:[F,A] therefore List2 to check is [C,D,E], [B,A,E],[F,A]  
+In level 2 we check the list2 if G is present. Care must be taken to avoid circular looping
+and ending up in an infinite loop.  Also we must avoid those elements which have already been checked                                                                                in a previous level,,,                                                                                                                                                             
+ Level 3: Only F:G is remaining Therefore we have link from A-F as in, A-C-E-F-G is the link and is acceptable.                                                                      
+PLEASE NOTE THAT AT THE MOMENT THE CODE DOES NOT HANDLE IF THERE ARE ANY REPETITIVE TRANSACTIONS BETWEEN ANY
+TWO POTENTIAL BUYERS AND SELLERS. THIS CAN BE OPTIMISED HOWEVER EVEN FURTHER, by potentially storing a list
+of two transactions that have been completed. This saves the re-searching of the graphs/dictionaries.
+
+The main Functions are :
+PandasDataFrame: Stores a transaction with two columns Buy and Sell from reading batch_payment.csv file
+This is the main reference variable that will be used for checking if a transaction has been made
+
+BatchPaymentFile=sys.argv[1] : Name of the reference batchpayment file
+SessionPaymentFile=sys.argv[2]: session_payment. file
+OutFile1 = sys.argv[3] : Output1.txt
+OutFile2 = sys.argv[4] : Output2.txt
+OutFile3 = sys.argv[5] : Output3.txt
+The appropriate path can be put into the sys.argv files.
+
+1.) CheckFraud: This is the main function that generates the output
+2.) WriteFeature: Writes the actual output
+'''
+
+####### IMPORT THE NECESSARY libraries ########################
+import pandas as pd
+import numpy as np
+import csv
+import sys
+
+#import Graphs as Graph : Dont use it for now.
+
+#colnames=['time',' id1',' id2',' amount']
+#df=pd.read_csv(open('batch_payment.csv','rU'),sep=',',usecols=colnames,engine='c',error_bad_lines=False)
+#print df
+
+
+######################################## INPUT OUTPUT ########################################
+# Parse the input: Read the batch_payment file and make a dataseries of buyer and seller.
+
+if len(sys.argv) != 6:
+  print 'Error in arguments: Provide the list of input and output files'
+
+#for i in sys.argv:
+  
+BatchPaymentFile=sys.argv[1]
+SessionPaymentFile=sys.argv[2]
+OutFile1 = sys.argv[3]
+OutFile2 = sys.argv[4]
+OutFile3 = sys.argv[5]
+
+#print OutFile3,OutFile2,OutFile1
+#sys.exit()
+
+f = open(BatchPaymentFile,'rU')
+csv_f = csv.reader(f)
+
+buyer=[]
+seller=[]
+SkipLine=0
+next(csv_f,None) # skip the header
+for row in csv_f:
+  if (len(row) >= 5):
+    buyer.append(row[1])
+    seller.append(row[2])
+
+f.close()
+
+#################### MAKE THE DATA FRAME ########################################
+# Create a dataframe using pandas in which the search will be done.
+# This contains the entire input from the batch_payment. 
+# In storing this dataframe a distincion is made based on buyer and seller.
+# i.e. if A-B and B-A then it is two different entries. But in handling it
+# later for the purpose, this will be simplified later and treated as one
+# equivalent transaction. 
+
+PandasFrame=pd.DataFrame({'Buy':buyer,'Sell':seller})
+
+
+
+###################### GRAPH FUNCTION ################################
+# The following function makes a graph of 
+# This is a function that creates a dictionary of mappings for
+# each buyer and seller id. They are all treated as strings.
+
+def GetDictionaryConnections(Names,KeyVal=[]):
+  Indices=np.where(PandasFrame['Buy'] == Names)
+  Indices1=np.where(PandasFrame['Sell'] == Names)
+  TransactionDict={}
+# Now we have the indices that we require                                                                                                                                          
+  Liste=[]
+  for j in Indices[0]:
+    Val=PandasFrame['Sell'].iloc[j]
+    if Val not in Liste and (Val not in KeyVal):
+      Liste.append(Val)
+  for k in Indices1[0]:
+    Val=PandasFrame['Buy'].iloc[k]
+    if Val not in Liste  and (Val not in KeyVal):
+      Liste.append(Val)
+    
+  TransactionDict[Names]=Liste
+  return TransactionDict
+  
+
+# This is an array of message that will be taken for the output.
+
+WARNINGMESSAGES=["trusted","unverified",
+                 "unverified: This user is not a friend or a \"friend of a friend\",Are you sure you would like to proceed with this payment?",
+                 "unverified: This user is outside your 4th degree network.i.e. not a friend of a friend of a friend of a friend."]
+
+
+# A general function for outputting the required messages in the output files
+#outfile1-3.txt. 
+def WriteFeature(OutFile,id):
+  OutFile.write(WARNINGMESSAGES[id]+'\n')
+
+# The tree variable is used to avoid looping and starting backa t the same place again.
+
+
+outfile1=open(OutFile1,'w')
+outfile2=open(OutFile2,'w')
+outfile3=open(OutFile3,'w')
+
+
+
+############ This is the main program which generates a kind of a graph-dictionary
+########### to get information on who had a transaction with whom.  ##############
+
+
+
+def CheckForFraud(RootKey,SearchId,CheckList):
+# First test is if the dictionary has zero elements:
+# Then it is unverified for all three.
+Tree=[] # A variable to avoid circular looping.
+
+  Tree.append(RootKey)
+  if len(CheckList) == 0:
+    WriteFeature(outfile1,1) # This is feature 1 Friend UNVERIFIED
+    WriteFeature(outfile2,2) 
+    WriteFeature(outfile3,3) 
+    return False
+
+# First search level # A- B connection
+  if SearchId in CheckList: 
+    WriteFeature(outfile1,0) # This is feature 1 Friend TRUSTED
+    WriteFeature(outfile2,0) 
+    WriteFeature(outfile3,0) 
+    return True
+  else:
+#    WriteFeature(outfile1,1)    # untrusted 
+#  print 'Searching... in Level -2' # A-B-C # This is feature 1
+    NewDict={}
+    for Names in CheckList:
+      if not Names in Tree:
+        Tree.append(Names)
+      NewDict=GetDictionaryConnections(Names,Tree)
+      if SearchId in NewDict[Names]:
+        WriteFeature(outfile1,1) # This is feature 1 Friend of Friend UNVERIFIED for 1
+        WriteFeature(outfile2,0) # TRUSTED for 2 and 3
+        WriteFeature(outfile3,0) 
+        return True
+    else:
+      print 'Searching... in Level -3' # A-B-C-D connection
+      NewDictLev1={}
+      for NamesLev1 in NewDict.keys():
+        if not NamesLev1 in Tree:
+          Tree.append(NamesLev1)
+        NewDictLev1=GetDictionaryConnections(NamesLev1,Tree)
+        if SearchId in NewDictLev1[NamesLev1]:
+          WriteFeature(outfile1,1)   # UNVERIFIED FOR 1
+          WriteFeature(outfile2,2)    # This is the feature 2: Not Friend of Friend
+          WriteFeature(outfile3,0)   #  TRUSTED for 3
+          return True
+      else:
+        print 'Searching... in Level -4' #A-B-C-D-E connection
+        NewDictLev2={}
+        for NamesLev2 in NewDictLev1.keys():
+          if not NamesLev2 in Tree:
+            Tree.append(NamesLev2)
+          NewDictLev2=GetDictionaryConnections(NamesLev2,Tree)
+          if SearchId in NewDictLev2[NamesLev2]:
+            WriteFeature(outfile1,1)
+            WriteFeature(outfile2,2)    # This is the feature 2: Not Friend of Friend
+            WriteFeature(outfile3,0)  # within 4 so it is trusted.  
+            return True
+
+        WriteFeature(outfile1,1)
+        WriteFeature(outfile2,2)    # This is the feature 2: Not Friend of Friend
+        WriteFeature(outfile3,3)       # Nothing found, this is feature 3.  Friend of Friend of Friend of Friend
+        return False
+
+
+############ FILE READING AND EXECUTION GOES HERE ##################    
+# This reads the stream_payment.csv file and appropriately 
+########### checks CALLS the function CheckForFraud
+
+
+f = open(SessionPaymentFile,'rU')
+csv_f = csv.reader(f)
+next(csv_f,None) # skip the header
+# Store the results
+
+for row in csv_f:
+  if (len(row) >= 5):
+    BuyerID  = row[1]
+    SellerID = row[2]
+#BuyerID=' 8552'
+#SellerID=' 52349'
+# It is more interesting from the buyers perspective so search his list first.
+        
+
+  SearchDict={}
+  SearchDict=GetDictionaryConnections(BuyerID,[])
+  SearchDictSeller={}
+  SearchDictSeller=GetDictionaryConnections(SellerID,[])
+  if len(SearchDict[BuyerID]) > 0:
+    if(CheckForFraud(BuyerID,SellerID,SearchDict[BuyerID])):
+      print 'Transaction was done...'
+    else:
+      print 'Not found.'
+                           
+
+print 'DONE...'
+
+sys.exit()
+
+
